@@ -1,0 +1,182 @@
+---
+- hosts: webservers
+  become: true
+  vars:
+    php_packages:
+      - php
+      - php-mysql
+      - php-fpm
+    web_root: /var/www/html 
+
+  tasks:
+    - name: 确保安装了 Python 2
+      yum:
+        name: python2
+        state: present
+
+    - name: 安装 Apache 和 PHP
+      yum:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - httpd
+        - "{{ php_packages }}"
+        - epel-release
+        - phpMyAdmin
+
+    - name: 启用并启动 PHP-FPM 服务
+      service:
+        name: php-fpm
+        enabled: true
+        state: started
+
+    - name: 启动 Apache 服务
+      service:
+        name: httpd
+        enabled: true
+        state: started
+
+    - name: 创建文档根目录
+      file:
+        path: "{{ web_root }}"
+        state: directory
+
+    - name: 确保日志目录存在
+      file:
+        path: /var/log/httpd
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: 部署 index.php 文件
+      copy:
+        src: files/index.php
+        dest: "{{ web_root }}/index.php"
+ 
+    - name: 设置虚拟主机配置
+      template:
+        src: templates/virtualhost.conf.j2
+        dest: /etc/httpd/conf.d/virtualhost.conf
+
+    - name: 配置 phpMyAdmin
+      lineinfile:
+        path: /etc/httpd/conf.d/phpMyAdmin.conf
+        regexp: '^Alias /phpMyAdmin'
+        line: 'Alias /phpMyAdmin /usr/share/phpMyAdmin'
+        create: yes
+
+    - name: 设置 phpMyAdmin 的正确权限
+      file:
+        path: /usr/share/phpMyAdmin
+        state: directory
+        owner: apache
+        group: apache
+        mode: '0755' 
+
+    
+    - name: 重启 Apache 服务
+      service:
+        name: httpd
+        state: restarted
+      
+- hosts: dbservers
+  become: true
+  vars:
+    mysql_root_password: "123456"
+    mysql_user_password: "123456"
+ 
+  tasks:
+    - name: 安装 MySQL 服务器和 Python MySQL 模块
+      yum:
+        name:
+          - mariadb-server
+          - MySQL-python
+        state: present
+
+    - name: 启用并启动 MySQL 服务
+      service:
+        name: mariadb
+        state: started
+        enabled: true
+
+    - name: 为 root 用户创建 MySQL 配置文件
+      copy:
+        content: |
+          [client]
+          user=root
+          password={{ mysql_root_password }}
+          [mysqld]
+          bind-address = 0.0.0.0
+
+        dest: /root/.my.cnf
+        owner: root
+        mode: '0600'
+
+    - name: 设置 MySQL root 用户密码
+      mysql_user:
+        name: root
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+        host: localhost
+        priv: "*.*:ALL,GRANT"
+        state: present
+        
+    - name: 删除现有数据库（如果存在）
+      mysql_db:
+        name: db1
+        state: absent
+      ignore_errors: true
+
+    - name: 创建数据库
+      mysql_db:
+        name: db1
+        state: present    
+      
+   
+        
+
+    - name: 创建 MySQL 用户
+      mysql_user:
+        name: LZCWGZ
+        login_password: "{{ mysql_user_password }}"
+        priv: 'db1.*:ALL'
+        host: '%'
+        state: present
+
+    
+    - name: 将初始 SQL 文件复制到目标主机
+      copy:
+        src: /etc/ansible/lamp/files/initial.sql  
+        dest: /tmp/initial.sql  
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: 导入初始 SQL 文件
+      mysql_db:
+        name: db1
+        state: import
+        target: /tmp/initial.sql
+       
+- hosts: localhost
+  gather_facts: yes
+  vars:
+    webserver_ip: "192.168.10.135"  
+    
+  tasks:
+    - name: 使用 URI 检查结果页面
+      uri:
+        url: "http://{{ webserver_ip }}/index.php"
+        return_content: yes
+      register: result_page
+
+    - name: 显示结果页面状态
+      debug:
+        msg: "{{ result_page.status }} {{ result_page.msg }}"
+
+    - name: 使用 URI 检查 phpMyAdmin 页面
+      uri:
+        url: "http://{{ webserver_ip }}/phpMyAdmin/"
+        return_content: yes
+      register: phpmyadmin_page
