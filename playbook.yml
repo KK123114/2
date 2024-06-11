@@ -65,7 +65,7 @@
         regexp: '^Alias /phpMyAdmin'
         line: 'Alias /phpMyAdmin /usr/share/phpMyAdmin'
         create: yes
-
+    - shell: sed -i "s/localhost/192.168.10.137/g" /usr/share/phpMyAdmin/libraries/config.default.php
     - name: 设置 phpMyAdmin 的正确权限
       file:
         path: /usr/share/phpMyAdmin
